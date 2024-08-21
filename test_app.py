@@ -1,50 +1,42 @@
+import time
 import pytest
-from flask import session
-from app import app  # Assuming your Flask app is in a file named app.py
+from app import SimpleSession  
 
 @pytest.fixture
-def client():
-    app.config['TESTING'] = True
-    app.config['SECRET_KEY'] = 'test_secret_key'
-    with app.test_client() as client:
-        with app.app_context():
-            yield client
+def session_manager():
+    return SimpleSession()
 
-def test_index_get(client):
-    """Test the index page GET request."""
-    response = client.get('/')
-    assert response.status_code == 200
-    assert b'Invalid password' not in response.data
+def test_create_session(session_manager):
+    session_id = session_manager.create_session()
+    assert session_id is not None
+    assert len(session_id) == 32  
+    assert session_id in session_manager.sessions
 
-def test_index_post_valid_password(client):
-    """Test POST request to index with the correct password."""
-    response = client.post('/', data={'username': 'test_user', 'password': 'password'})
-    assert response.status_code == 302  # Redirect to /protected
-    assert session['user'] == 'test_user'
+def test_set_and_get_session_data(session_manager):
+    session_id = session_manager.create_session()
+    session_manager.set_session_data(session_id, 'username', 'john_doe')
+    data = session_manager.get_session_data(session_id)
+    assert data is not None
+    assert data['username'] == 'john_doe'
 
-def test_index_post_invalid_password(client):
-    """Test POST request to index with an invalid password."""
-    response = client.post('/', data={'username': 'test_user', 'password': 'wrong_password'})
-    assert response.status_code == 200  # Stay on the same page
-    assert b'Invalid password' in response.data
+def test_cleanup_sessions(session_manager):
+    session_id = session_manager.create_session()
+    session_manager.set_session_data(session_id, 'username', 'john_doe')
 
-def test_protected_logged_in(client):
-    """Test accessing the protected route when logged in."""
-    with client.session_transaction() as sess:
-        sess['user'] = 'test_user'
-    response = client.get('/protected')
-    assert response.status_code == 200
-    assert b'test_user' in response.data
+    time.sleep(2)
+    session_manager.cleanup_sessions(timeout=1)
+    
+    assert session_id not in session_manager.sessions
 
-def test_protected_not_logged_in(client):
-    """Test accessing the protected route when not logged in."""
-    response = client.get('/protected')
-    assert response.status_code == 302  # Redirect to /
+def test_cleanup_sessions_no_deletion(session_manager):
+    session_id = session_manager.create_session()
+    session_manager.set_session_data(session_id, 'username', 'john_doe')
 
-def test_dropsession(client):
-    """Test the dropsession route."""
-    with client.session_transaction() as sess:
-        sess['user'] = 'test_user'
-    response = client.get('/dropsession')
-    assert response.status_code == 302  # Redirect to /
-    assert 'user' not in session
+    session_manager.cleanup_sessions(timeout=10)
+    
+    assert session_id in session_manager.sessions
+
+def test_get_nonexistent_session_data(session_manager):
+    session_id = "nonexistent_session"
+    data = session_manager.get_session_data(session_id)
+    assert data is None
